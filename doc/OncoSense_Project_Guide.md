@@ -64,6 +64,32 @@ The interface you interact with in the browser is built with **HTML, CSS, and Ja
 
 ---
 
+## 📁 Project Directory Breakdown
+
+Here is a folder-wise breakdown of the project architecture and what each folder is responsible for:
+
+### 1. `flaskApp/` (The Application Core)
+This folder contains the actual web application that users interact with.
+- `app.py`: The main Python backend server. It handles routing, loads the machine learning predictions, and communicates with the Gemini AI API.
+- `templates/`: Contains the Jinja2 HTML templates (`index.html`, `result.html`, `explore.html`) that structure the frontend web pages.
+- `static/`: Holds the CSS stylesheets (`style.css`, `result.css`) and static assets (like Lottie animations) to make the frontend look beautiful.
+- `tests/`: Contains automated unit tests (`test_app.py`) to ensure the backend logic and API endpoints are working correctly.
+
+### 2. `CaDRReS-master/` (The Machine Learning Core)
+This folder contains the original CaDRReS (Cancer Drug Response prediction using a Recommender System) framework and its generated datasets.
+- `output/`: The most important sub-folder for the web app. It contains `ccle_all_pred_end.csv`, the massive pre-computed dataset containing IC50 predictions that `app.py` reads from.
+- `input/`: Contains the raw biological feature data (like gene expression CSVs from the CCLE database) used to train the model.
+- `scripts/`: Contains Python scripts used by data scientists to train the model, fit sigmoid curves, and perform cross-validation.
+
+### 3. `doc/` (Documentation)
+- Contains all project-related documentation, guides, and technical analyses (including this very file) to help developers and reviewers understand the system.
+
+### 4. Root Files
+- `Dockerfile`: Contains the instructions to package the entire `flaskApp` and the dataset into a portable Docker container for deployment to platforms like Render.
+- `.gitignore`: A configuration file that tells Git which files and folders to ignore (like `.venv` and `.env`) so sensitive or massive files aren't accidentally uploaded to GitHub.
+
+---
+
 ## 💻 Prerequisites & Setup
 
 To run this project locally, you need the following installed on your machine:

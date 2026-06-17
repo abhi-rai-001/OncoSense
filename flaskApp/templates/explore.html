@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="OncoSense Data Explorer — Interactive heatmap of cancer drug sensitivity across all cell lines and drugs." />
+  <title>Data Explorer — OncoSense</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+
+  <!-- Plotly — scientific chart library -->
+  <script src="https://cdn.plot.ly/plotly-2.27.0.min.js" defer></script>
+
+  <style>
+    /* ── Explorer-specific overrides ─────────────────── */
+
+    .explorer-layout {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: var(--space-6);
+      padding: calc(var(--space-12) + 40px) var(--space-8) var(--space-8);
+      max-width: 1400px;
+      margin: 0 auto;
+      min-height: calc(100vh - 73px);
+    }
+
+    @media (max-width: 900px) {
+      .explorer-layout { grid-template-columns: 1fr; }
+    }
+
+    /* ── Sidebar ───────────────────────────────────── */
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-6);
+    }
+
+    .sidebar-card {
+      background: var(--clr-surface);
+      border: 1px solid var(--clr-border);
+      border-radius: var(--radius-lg);
+      padding: var(--space-6);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .sidebar-card::before {
+      content: '';
+      position: absolute;
+      top: -1px; left: 15%; right: 15%;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(139,92,246,0.25), transparent);
+    }
+
+    .sidebar-title {
+      font-family: var(--font-display);
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--clr-text-muted);
+      margin-bottom: var(--space-4);
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+    }
+
+    .sidebar-title::before {
+      content: '';
+      width: 3px;
+      height: 12px;
+      background: var(--clr-accent-1);
+      border-radius: var(--radius-full);
+    }
+
+    /* Tissue filter pills */
+    .tissue-grid {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-2);
+    }
+
+    .tissue-btn {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      padding: var(--space-3) var(--space-4);
+      background: var(--clr-surface-2);
+      border: 1px solid var(--clr-border);
+      border-radius: var(--radius-md);
+      font-family: var(--font-sans);
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--clr-text-muted);
+      cursor: pointer;
+      transition: all var(--transition-base);
+      text-align: left;
+    }
+
+    .tissue-btn:hover {
+      background: var(--clr-surface-3);
+      border-color: var(--clr-border-hover);
+      color: var(--clr-text);
+    }
+
+    .tissue-btn.active {
+      background: var(--accent-dim);
+      border-color: var(--border-active);
+      color: var(--accent-light);
+    }
+
+    .tissue-btn .tissue-count {
+      font-size: 0.68rem;
+      background: var(--clr-surface-3);
+      padding: 2px 7px;
+      border-radius: var(--radius-full);
+      color: var(--clr-text-dim);
+      flex-shrink: 0;
+    }
+
+    .tissue-btn.active .tissue-count {
+      background: rgba(139,92,246,0.15);
+      color: var(--accent-light);
+    }
+
+    .tissue-btn .tissue-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* Threshold control in sidebar */
+    .sidebar-threshold {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-3);
+    }
+
+    .threshold-value-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .threshold-num {
+      font-family: var(--mono);
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: var(--accent-light);
+    }
+
+    .threshold-meta {
+      font-size: 0.72rem;
+      color: var(--clr-text-dim);
+    }
+
+    /* Stats mini-cards */
+    .mini-stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--space-3);
+    }
+
+    .mini-stat {
+      background: var(--clr-surface-2);
+      border: 1px solid var(--clr-border);
+      border-radius: var(--radius-md);
+      padding: var(--space-3);
+      text-align: center;
+    }
+
+    .mini-stat-val {
+      font-family: var(--mono);
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .mini-stat-lbl {
+      font-size: 0.62rem;
+      color: var(--clr-text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    /* ── Main chart area ──────────────────────────── */
+    .chart-area {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-6);
+    }
+
+    .chart-panel {
+      background: var(--clr-surface);
+      border: 1px solid var(--clr-border);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      position: relative;
+    }
+
+    .chart-panel::before {
+      content: '';
+      position: absolute;
+      top: -1px; left: 15%; right: 15%;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(139,92,246,0.25), transparent);
+      z-index: 1;
+    }
+
+    .chart-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--space-5) var(--space-6);
+      border-bottom: 1px solid var(--clr-border);
+      flex-wrap: wrap;
+      gap: var(--space-3);
+    }
+
+    .chart-title-group {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .chart-title {
+      font-family: var(--font-display);
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--clr-text);
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+    }
+
+    .chart-subtitle {
+      font-size: 0.75rem;
+      color: var(--clr-text-muted);
+    }
+
+    .chart-actions {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+    }
+
+    .chart-badge {
+      font-size: 0.7rem;
+      font-weight: 500;
+      color: var(--clr-text-dim);
+      background: var(--clr-surface-2);
+      padding: 3px 10px;
+      border-radius: var(--radius-full);
+      border: 1px solid var(--clr-border);
+    }
+
+    /* Loading state */
+    .chart-loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: var(--space-24);
+      gap: var(--space-4);
+    }
+
+    .chart-loading-text {
+      font-size: 0.85rem;
+      color: var(--clr-text-muted);
+    }
+
+    #heatmap-container {
+      min-height: 520px;
+      width: 100%;
+    }
+
+    /* Top drugs bar chart below heatmap */
+    #top-drugs-container {
+      min-height: 320px;
+      width: 100%;
+    }
+
+    /* Legend pill row */
+    .legend-row {
+      display: flex;
+      align-items: center;
+      gap: var(--space-6);
+      padding: var(--space-4) var(--space-6);
+      border-top: 1px solid var(--clr-border);
+      font-size: 0.75rem;
+      color: var(--clr-text-muted);
+      flex-wrap: wrap;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+    }
+
+    .legend-swatch {
+      width: 32px;
+      height: 10px;
+      border-radius: 3px;
+    }
+
+    /* Explore-to-predict CTA */
+    .explore-cta {
+      background: linear-gradient(135deg, rgba(0,212,255,0.06) 0%, rgba(124,58,237,0.06) 100%);
+      border: 1px solid rgba(0,212,255,0.15);
+      border-radius: var(--radius-lg);
+      padding: var(--space-6);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-4);
+      flex-wrap: wrap;
+    }
+
+    .cta-text {
+      font-size: 0.9rem;
+      color: var(--clr-text-muted);
+    }
+
+    .cta-text strong { color: var(--clr-text); }
+  </style>
+</head>
+<body>
+
+<canvas id="bg-canvas" aria-hidden="true"></canvas>
+
+<div class="page-wrap">
+
+  <!-- ── HEADER ─────────────────────────────────────── -->
+  <header class="site-header">
+    <a href="/" class="site-logo" aria-label="OncoSense Home">
+      <span class="logo-name">OncoSense</span>
+      <span class="logo-tag">v3.0</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/">Predictor</a>
+      <a href="/explore" class="active">Explorer</a>
+    </nav>
+  </header>
+
+  <!-- ── EXPLORER BODY ──────────────────────────────── -->
+  <div class="explorer-layout">
+
+    <!-- ── SIDEBAR ──────────────────────────────────── -->
+    <aside class="sidebar animate-in" aria-label="Filters">
+
+      <!-- Summary stats -->
+      <div class="sidebar-card">
+        <div class="sidebar-title">Dataset Overview</div>
+        <div class="mini-stats">
+          <div class="mini-stat">
+            <div class="mini-stat-val" id="stat-visible-lines">491</div>
+            <div class="mini-stat-lbl">Cell Lines</div>
+          </div>
+          <div class="mini-stat">
+            <div class="mini-stat-val">19</div>
+            <div class="mini-stat-lbl">Drugs</div>
+          </div>
+          <div class="mini-stat">
+            <div class="mini-stat-val" id="stat-sensitive-pct">—</div>
+            <div class="mini-stat-lbl">% Sensitive</div>
+          </div>
+          <div class="mini-stat">
+            <div class="mini-stat-val">CCLE</div>
+            <div class="mini-stat-lbl">Dataset</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Threshold slider -->
+      <div class="sidebar-card">
+        <div class="sidebar-title">IC50 Threshold</div>
+        <div class="sidebar-threshold">
+          <div class="threshold-value-row">
+            <div class="threshold-num" id="sidebar-threshold-display">3.0</div>
+            <div class="threshold-meta">IC50 cutoff</div>
+          </div>
+          <input
+            type="range"
+            id="sidebar-threshold"
+            min="0" max="10" step="0.5"
+            value="{{ default_threshold }}"
+            aria-label="Sensitivity threshold"
+          />
+          <div style="display:flex;justify-content:space-between;font-size:0.68rem;color:var(--clr-text-dim);margin-top:2px;">
+            <span>0 — Very sensitive</span>
+            <span>10 — Resistant</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tissue type filter -->
+      <div class="sidebar-card" style="flex:1;overflow:hidden;display:flex;flex-direction:column;">
+        <div class="sidebar-title">Filter by Tissue</div>
+        <div class="tissue-grid" id="tissue-filter" style="overflow-y:auto;flex:1;scrollbar-width:thin;scrollbar-color:var(--clr-surface-3) transparent;" role="radiogroup" aria-label="Tissue type filter">
+          <button class="tissue-btn active" data-tissue="ALL" role="radio" aria-checked="true">
+            <span class="tissue-name">All Tissues</span>
+            <span class="tissue-count">491</span>
+          </button>
+          {% for tissue in tissue_list %}
+          <button class="tissue-btn" data-tissue="{{ tissue }}" role="radio" aria-checked="false">
+            <span class="tissue-name">{{ tissue.replace('_', ' ').title() }}</span>
+            <span class="tissue-count" id="tc-{{ tissue }}">—</span>
+          </button>
+          {% endfor %}
+        </div>
+      </div>
+
+    </aside>
+
+    <!-- ── MAIN CHART AREA ───────────────────────────── -->
+    <main class="chart-area animate-in delay-1">
+
+      <!-- PRIMARY: Heatmap -->
+      <div class="chart-panel">
+        <div class="chart-header">
+          <div class="chart-title-group">
+            <h1 class="chart-title">
+              <span aria-hidden="true">🔥</span>
+              Drug Sensitivity Heatmap
+            </h1>
+            <div class="chart-subtitle">
+              IC50 values · All cell lines vs all drugs · Hover any cell for details
+            </div>
+          </div>
+          <div class="chart-actions">
+            <span class="chart-badge" id="heatmap-count-badge">Loading…</span>
+            <span class="chart-badge" id="heatmap-tissue-badge">All Tissues</span>
+          </div>
+        </div>
+
+        <div id="heatmap-loading" class="chart-loading" aria-live="polite">
+          <div class="dna-loader" aria-hidden="true">
+            <div class="dna-bar"></div>
+            <div class="dna-bar"></div>
+            <div class="dna-bar"></div>
+            <div class="dna-bar"></div>
+            <div class="dna-bar"></div>
+          </div>
+          <div class="chart-loading-text">Loading heatmap data…</div>
+        </div>
+        <div id="heatmap-container" style="display:none;" aria-label="Drug sensitivity heatmap — interactive Plotly chart"></div>
+
+        <div class="legend-row" aria-label="Colour scale legend">
+          <div class="legend-item">
+            <div class="legend-swatch" style="background: linear-gradient(90deg, #0d1b2a, #0a4a6e, #0891b2, #06d6a0, #c8f7a6);" aria-hidden="true"></div>
+            <span>Low IC50 — Sensitive</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-swatch" style="background: linear-gradient(90deg, #c8f7a6, #ffd166, #ef476f, #7b2d8b);" aria-hidden="true"></div>
+            <span>High IC50 — Resistant</span>
+          </div>
+          <div class="legend-item" style="margin-left:auto;">
+            <span style="font-size:0.7rem;color:var(--clr-text-dim);">
+              Use Plotly toolbar to zoom · download PNG · pan
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- SECONDARY: Top sensitive drugs bar chart -->
+      <div class="chart-panel">
+        <div class="chart-header">
+          <div class="chart-title-group">
+            <h2 class="chart-title">
+              <span aria-hidden="true">📊</span>
+              Sensitive Cell Lines per Drug
+            </h2>
+            <div class="chart-subtitle" id="bar-subtitle">
+              Number of cell lines below sensitivity threshold across all drugs
+            </div>
+          </div>
+          <div class="chart-actions">
+            <span class="chart-badge" id="bar-tissue-badge">All Tissues</span>
+          </div>
+        </div>
+        <div id="top-drugs-loading" class="chart-loading" style="padding:var(--space-12);" aria-live="polite">
+          <div class="chart-loading-text">Calculating…</div>
+        </div>
+        <div id="top-drugs-container" style="display:none;" aria-label="Bar chart of sensitive cell lines per drug"></div>
+      </div>
+
+      <!-- CTA back to predictor -->
+      <div class="explore-cta">
+        <div class="cta-text">
+          <strong>Found an interesting pattern?</strong>
+          Head to the predictor to run a detailed single-cell-line analysis.
+        </div>
+        <a href="/" class="btn-predict" style="width:auto;margin-top:0;padding:var(--space-3) var(--space-6);font-size:0.875rem;">
+          Open Predictor
+          <svg class="btn-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M5 12h14M12 5l7 7-7 7"/>
+          </svg>
+        </a>
+      </div>
+
+    </main>
+
+  </div><!-- /explorer-layout -->
+
+  <footer class="site-footer">
+    <div class="footer-note"><strong>OncoSense</strong> — Data Explorer · Powered by CaDRReS + Plotly.js</div>
+    <div class="footer-note">CCLE Dataset · For research use only</div>
+  </footer>
+
+</div><!-- /page-wrap -->
+
+<script>
+// ────────────────────────────────────────────────────────
+// STATE
+// ────────────────────────────────────────────────────────
+let currentTissue    = 'ALL';
+let currentThreshold = parseFloat("{{ default_threshold }}");
+let heatmapData      = null;          // cached API response
+let debounceTimer    = null;
+
+// Tissue counts (filled from first API call)
+const tissueCounts = {};
+
+// ────────────────────────────────────────────────────────
+// PLOTLY SHARED CONFIG
+// ────────────────────────────────────────────────────────
+const PLOTLY_CONFIG = {
+  responsive:    true,
+  displaylogo:   false,
+  modeBarButtonsToRemove: ['select2d', 'lasso2d', 'autoScale2d'],
+  toImageButtonOptions: {
+    format: 'png',
+    filename: 'oncosense_heatmap',
+    scale: 2,
+  }
+};
+
+const DARK_LAYOUT = {
+  paper_bgcolor: 'transparent',
+  plot_bgcolor:  'transparent',
+  font:          { family: 'Plus Jakarta Sans, system-ui, sans-serif', color: '#a1a1aa', size: 11 },
+  margin:        { l: 0, r: 20, t: 10, b: 10 },
+};
+
+// Custom dark-mode colourscale: indigo → cyan → green → yellow → red
+const BIOTECH_COLORSCALE = [
+  [0.0,  '#09090b'],
+  [0.15, '#2e1065'],
+  [0.3,  '#6d28d9'],
+  [0.5,  '#8b5cf6'],
+  [0.65, '#a78bfa'],
+  [0.8,  '#34d399'],
+  [0.9,  '#fbbf24'],
+  [1.0,  '#fb7185'],
+];
+
+// ────────────────────────────────────────────────────────
+// FETCH HEATMAP DATA
+// ────────────────────────────────────────────────────────
+async function fetchHeatmapData(tissue, threshold) {
+  const params = new URLSearchParams({ tissue, threshold });
+  const res = await fetch(`/api/heatmap-data?${params}`);
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// ────────────────────────────────────────────────────────
+// RENDER HEATMAP
+// ────────────────────────────────────────────────────────
+function renderHeatmap(data) {
+  const { x, y, z, tissues, threshold, count } = data;
+  heatmapData = data;
+
+  // Build hover text grid
+  const hoverText = z.map((row, ri) =>
+    row.map((ic50, ci) => {
+      const sens = ic50 > threshold ? '✅ Sensitive' : '⛔ Resistant';
+      const cl   = y[ri];
+      return `<b>${cl.split('_')[0]}</b><br>Drug: ${x[ci]}<br>IC50: ${ic50.toFixed(3)}<br>${sens}<br><i style="color:#7a90ab">${tissues[ri].replace(/_/g,' ')}</i>`;
+    })
+  );
+
+  // IC50 range for colour axis
+  const flat = z.flat();
+  const zMin = Math.min(...flat);
+  const zMax = Math.max(...flat);
+
+  // Threshold marker
+  // We draw a horizontal annotation line at threshold on the colorscale value
+  const thresholdNorm = (threshold - zMin) / (zMax - zMin);
+
+  const trace = {
+    type:        'heatmap',
+    x,
+    y,
+    z,
+    text:        hoverText,
+    hovertemplate: '%{text}<extra></extra>',
+    colorscale:  BIOTECH_COLORSCALE,
+    zmin:        zMin,
+    zmax:        zMax,
+    colorbar: {
+      title:      { text: 'IC50', font: { color: '#a1a1aa', size: 11 } },
+      tickfont:   { color: '#a1a1aa', size: 10 },
+      thickness:  14,
+      len:        0.8,
+      x:          1.01,
+    },
+    xgap: 0.5,
+    ygap: 0.5,
+  };
+
+  // Axes
+  const fontSize = count > 100 ? 7 : count > 50 ? 9 : 11;
+  const layout = {
+    ...DARK_LAYOUT,
+    height: Math.max(480, Math.min(count * 14, 900)),
+    xaxis: {
+      title:      '',
+      tickfont:   { color: '#a1a1aa', size: 11 },
+      tickangle:  -35,
+      gridcolor:  'rgba(255,255,255,0.04)',
+      linecolor:  'rgba(255,255,255,0.08)',
+      fixedrange: false,
+    },
+    yaxis: {
+      title:    '',
+      tickfont: { color: '#a1a1aa', size: fontSize },
+      gridcolor:'rgba(255,255,255,0.04)',
+      linecolor:'rgba(255,255,255,0.08)',
+      autorange:'reversed',
+      fixedrange: false,
+    },
+    shapes: [{
+      // Dashed colour-axis line marking the threshold level
+      type:     'line',
+      xref:     'paper',
+      yref:     'paper',
+      x0: 0, x1: 1,
+      y0: thresholdNorm, y1: thresholdNorm,
+      line:     { color: 'rgba(124,58,237,0)', width: 0 },
+    }],
+    hoverlabel: {
+      bgcolor:    '#141418',
+      bordercolor:'rgba(139,92,246,0.3)',
+      font:       { family: 'Plus Jakarta Sans, sans-serif', size: 12, color: '#fafafa' },
+    },
+  };
+
+  document.getElementById('heatmap-loading').style.display  = 'none';
+  document.getElementById('heatmap-container').style.display = 'block';
+
+  Plotly.react('heatmap-container', [trace], layout, PLOTLY_CONFIG);
+
+  // Update badges
+  const tissueLabel = currentTissue === 'ALL' ? 'All Tissues'
+    : currentTissue.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  document.getElementById('heatmap-count-badge').textContent  = `${count} cell lines`;
+  document.getElementById('heatmap-tissue-badge').textContent = tissueLabel;
+  document.getElementById('stat-visible-lines').textContent   = count;
+
+  // Compute % sensitive at current threshold
+  let sensitiveCount = 0;
+  z.forEach(row => row.forEach(v => { if (v > threshold) sensitiveCount++; }));
+  const pct = ((sensitiveCount / (z.length * x.length)) * 100).toFixed(1);
+  document.getElementById('stat-sensitive-pct').textContent = pct + '%';
+}
+
+// ────────────────────────────────────────────────────────
+// RENDER DRUG BAR CHART
+// ────────────────────────────────────────────────────────
+function renderDrugBars(data) {
+  const { x: drugs, z, threshold, count } = data;
+
+  // For each drug (column), count sensitive cell lines
+  const sensitiveCounts = drugs.map((_, di) =>
+    z.reduce((acc, row) => acc + (row[di] > threshold ? 1 : 0), 0)
+  );
+
+  // Sort by count descending
+  const order = sensitiveCounts.map((v, i) => [v, i]).sort((a, b) => b[0] - a[0]);
+  const sortedDrugs  = order.map(([, i]) => drugs[i]);
+  const sortedCounts = order.map(([v]) => v);
+  const pcts         = sortedCounts.map(c => ((c / count) * 100).toFixed(1));
+
+  const barColours = sortedCounts.map(c =>
+    c / count > 0.5 ? 'rgba(52,211,153,0.8)' : c / count > 0.25 ? 'rgba(167,139,250,0.7)' : 'rgba(139,92,246,0.5)'
+  );
+
+  const trace = {
+    type:        'bar',
+    x:           sortedDrugs,
+    y:           sortedCounts,
+    text:        pcts.map(p => `${p}%`),
+    textposition:'outside',
+    textfont:    { color: '#a1a1aa', size: 10 },
+    marker:      { color: barColours, line: { color: 'rgba(255,255,255,0.06)', width: 1 } },
+    hovertemplate: '<b>%{x}</b><br>Sensitive lines: %{y}<br>%{text} of visible set<extra></extra>',
+  };
+
+  const layout = {
+    ...DARK_LAYOUT,
+    height: 300,
+    margin: { l: 40, r: 20, t: 20, b: 80 },
+    xaxis: {
+      tickfont:   { color: '#a1a1aa', size: 10 },
+      tickangle:  -35,
+      gridcolor:  'rgba(255,255,255,0.03)',
+      linecolor:  'rgba(255,255,255,0.06)',
+    },
+    yaxis: {
+      title:     { text: 'Sensitive Cell Lines', font: { color: '#a1a1aa', size: 10 } },
+      tickfont:  { color: '#a1a1aa', size: 10 },
+      gridcolor: 'rgba(255,255,255,0.05)',
+      linecolor: 'rgba(255,255,255,0.06)',
+    },
+    bargap: 0.3,
+    hoverlabel: {
+      bgcolor: '#141418',
+      bordercolor: 'rgba(139,92,246,0.3)',
+      font: { family: 'Plus Jakarta Sans, sans-serif', size: 12, color: '#fafafa' },
+    },
+    shapes: [{
+      type: 'line',
+      xref: 'paper', x0: 0, x1: 1,
+      yref: 'y', y0: count / 2, y1: count / 2,
+      line: { color: 'rgba(124,58,237,0.3)', width: 1, dash: 'dot' },
+    }],
+  };
+
+  document.getElementById('top-drugs-loading').style.display   = 'none';
+  document.getElementById('top-drugs-container').style.display = 'block';
+
+  Plotly.react('top-drugs-container', [trace], layout, PLOTLY_CONFIG);
+
+  const tissueLabel = currentTissue === 'ALL' ? 'All Tissues'
+    : currentTissue.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  document.getElementById('bar-tissue-badge').textContent = tissueLabel;
+  document.getElementById('bar-subtitle').textContent =
+    `Sensitive count by drug · Threshold: ${threshold} · Showing ${count} cell lines`;
+}
+
+// ────────────────────────────────────────────────────────
+// BUILD TISSUE COUNTS (from first full dataset load)
+// ────────────────────────────────────────────────────────
+function populateTissueCounts(data) {
+  const counts = {};
+  data.tissues.forEach(t => { counts[t] = (counts[t] || 0) + 1; });
+  Object.assign(tissueCounts, counts);
+
+  // Update count badges in sidebar
+  document.querySelectorAll('.tissue-btn[data-tissue]').forEach(btn => {
+    const t = btn.getAttribute('data-tissue');
+    if (t === 'ALL') {
+      btn.querySelector('.tissue-count').textContent = data.y.length;
+    } else if (counts[t] !== undefined) {
+      const el = document.getElementById(`tc-${t}`);
+      if (el) el.textContent = counts[t];
+    }
+  });
+}
+
+// ────────────────────────────────────────────────────────
+// LOAD & REFRESH (debounced)
+// ────────────────────────────────────────────────────────
+function scheduleRefresh() {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(doLoad, 300);
+}
+
+async function doLoad() {
+  // Show loading spinners only if container not already rendered
+  if (document.getElementById('heatmap-container').style.display === 'none') {
+    document.getElementById('heatmap-loading').style.display = 'flex';
+  }
+  if (document.getElementById('top-drugs-container').style.display === 'none') {
+    document.getElementById('top-drugs-loading').style.display = 'flex';
+  }
+
+  try {
+    const data = await fetchHeatmapData(currentTissue, currentThreshold);
+
+    // On first load, populate tissue counts
+    if (Object.keys(tissueCounts).length === 0 && currentTissue === 'ALL') {
+      populateTissueCounts(data);
+    }
+
+    renderHeatmap(data);
+    renderDrugBars(data);
+  } catch (err) {
+    console.error('Failed to load heatmap data:', err);
+    document.getElementById('heatmap-loading').innerHTML =
+      `<div style="color:var(--clr-resistant);font-size:0.85rem;">⚠ Failed to load data. Please refresh.</div>`;
+  }
+}
+
+// ────────────────────────────────────────────────────────
+// TISSUE FILTER CLICK
+// ────────────────────────────────────────────────────────
+document.getElementById('tissue-filter').addEventListener('click', (e) => {
+  const btn = e.target.closest('.tissue-btn');
+  if (!btn) return;
+
+  document.querySelectorAll('.tissue-btn').forEach(b => {
+    b.classList.remove('active');
+    b.setAttribute('aria-checked', 'false');
+  });
+  btn.classList.add('active');
+  btn.setAttribute('aria-checked', 'true');
+
+  currentTissue = btn.getAttribute('data-tissue');
+  scheduleRefresh();
+});
+
+// ────────────────────────────────────────────────────────
+// THRESHOLD SLIDER
+// ────────────────────────────────────────────────────────
+const thresholdSlider  = document.getElementById('sidebar-threshold');
+const thresholdDisplay = document.getElementById('sidebar-threshold-display');
+
+thresholdSlider.addEventListener('input', () => {
+  currentThreshold = parseFloat(thresholdSlider.value);
+  thresholdDisplay.textContent = currentThreshold.toFixed(1);
+  scheduleRefresh();
+});
+
+// ────────────────────────────────────────────────────────
+// DNA PARTICLE CANVAS
+// ────────────────────────────────────────────────────────
+(function initCanvas() {
+  const canvas = document.getElementById('bg-canvas');
+  const ctx    = canvas.getContext('2d');
+  let W, H, nodes, animId;
+  function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
+  function createNodes() {
+    nodes = Array.from({ length: 45 }, () => ({
+      x: Math.random()*W, y: Math.random()*H,
+      vx: (Math.random()-0.5)*0.22, vy: (Math.random()-0.5)*0.22,
+      r: 1+Math.random()*1.5,
+    }));
+  }
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    for (const n of nodes) { n.x+=n.vx; n.y+=n.vy; if(n.x<0||n.x>W)n.vx*=-1; if(n.y<0||n.y>H)n.vy*=-1; }
+    for (let i=0;i<nodes.length;i++) for (let j=i+1;j<nodes.length;j++) {
+      const dx=nodes[i].x-nodes[j].x,dy=nodes[i].y-nodes[j].y,d=Math.sqrt(dx*dx+dy*dy);
+      if(d<120){const a=(1-d/120)*0.15;ctx.strokeStyle=`rgba(139,92,246,${a})`;ctx.lineWidth=0.5;ctx.beginPath();ctx.moveTo(nodes[i].x,nodes[i].y);ctx.lineTo(nodes[j].x,nodes[j].y);ctx.stroke();}
+    }
+    for (const n of nodes) { ctx.beginPath();ctx.arc(n.x,n.y,n.r,0,Math.PI*2);ctx.fillStyle='rgba(139,92,246,0.4)';ctx.fill(); }
+    animId=requestAnimationFrame(draw);
+  }
+  window.addEventListener('resize',()=>{cancelAnimationFrame(animId);resize();draw();});
+  resize();createNodes();draw();
+})();
+
+// ────────────────────────────────────────────────────────
+// BOOT — wait for Plotly then load data
+// ────────────────────────────────────────────────────────
+function waitForPlotly() {
+  if (typeof Plotly !== 'undefined') {
+    doLoad();
+  } else {
+    setTimeout(waitForPlotly, 100);
+  }
+}
+waitForPlotly();
+</script>
+
+</body>
+</html>

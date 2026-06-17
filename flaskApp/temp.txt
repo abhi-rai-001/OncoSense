@@ -1,0 +1,69 @@
+//https://chat.openai.com/c/72d14c78-3012-4554-8e0d-ec4ece5cf817
+
+
+from flask import Flask, render_template, request
+import pandas as pd
+import plotly.express as px
+
+
+app = Flask(__name__, template_folder='templates', static_folder='static')
+
+# Dummy Data
+cell_lines = ["Breast Cancer", "Lung Cancer", "Colon Cancer", "Prostate Cancer", "Leukemia", "Ovarian Cancer"]
+drugs = ["Tamoxifen", "Herceptin", "Lapatinib","Cisplatin", "Erlotinib", "Nivolumab"]
+
+# Render Homepage
+@app.route('/')
+def index():
+    return render_template('index.html', cell_lines=cell_lines, drugs=drugs)
+
+# Process Form Data
+# Process Form Data
+@app.route('/result', methods=['POST'])
+def result():
+    selected_cell_line = request.form.get('cell_line')
+    selected_drug = request.form.get('drug')
+
+    # Dummy Data: Replace with your actual logic
+    sensitivity = predict_sensitivity(selected_cell_line, selected_drug)
+
+    return render_template('result.html', cell_line=selected_cell_line, drug=selected_drug, sensitivity=sensitivity)
+
+def predict_sensitivity(cell_line, drug):
+    # Add your prediction logic here
+    # You may use machine learning models or any other approach to predict sensitivity
+    # This is a placeholder, replace it with your actual logic
+    
+    
+    if cell_line == 'Breast Cancer' and drug == 'Tamoxifen':
+        return 'Sensitive'
+    else:
+        return 'Resistant'
+    
+    
+    
+
+
+if __name__ == '__main__':
+    app.run(debug=True)
+    
+    # "C:\Users\Asus\Desktop\CaDRReS-master\CaDRReS-master\output\10D\seed0\lr0-01\CaDRReS_pred_1000_ckpt.pickle"
+
+
+
+
+
+
+model_path = "C:\\Users\\Asus\\Desktop\\CaDRReS-master\\CaDRReS-master\\output\\ccle_all_pred_end.pickle"
+
+df = pd.read_csv("C:\\Users\\Asus\\Desktop\\CaDRReS-master\\CaDRReS-master\\output\\10D\\seed0\\lr0-01\\CaDRReS_pred_33000_ckpt.csv")
+
+with open(model_path, 'rb') as model_file:
+    if six.PY2:
+        # In Python 2, load the model without encoding
+        model = pickle.load(model_file)
+    else:
+        # In Python 3, load the model with encoding='latin1'
+        model = pickle.load(model_file, encoding='latin1')   
+
+

@@ -1,0 +1,1062 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="OncoSense drug response result for {{ cell_line }} with {{ drug }}." />
+  <title>{{ sensitivity }} — {{ drug }} · OncoSense</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+
+  <!-- Chart.js for donut -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <!-- Plotly for advanced charts -->
+  <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+
+  <style>
+    /* ── Result-page Plotly chart containers ─────────────── */
+    .plotly-chart-container {
+      width: 100%;
+      min-height: 340px;
+    }
+
+    .plotly-chart-container.tall {
+      min-height: 420px;
+    }
+
+    /* Tabs for the dose-response section */
+    .chart-tabs {
+      display: flex;
+      gap: var(--s-2, 8px);
+      margin-bottom: var(--s-4, 16px);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+
+    .chart-tab {
+      padding: 8px 16px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      font-family: var(--font-display, sans-serif);
+      color: var(--text-3, #71717a);
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+      transition: color 0.2s, border-color 0.2s;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .chart-tab.active {
+      color: var(--accent-light, #a78bfa);
+      border-bottom-color: var(--accent-light, #a78bfa);
+    }
+
+    .chart-tab:hover:not(.active) {
+      color: var(--text-2, #a1a1aa);
+    }
+
+    .chart-pane {
+      display: none;
+    }
+    .chart-pane.active {
+      display: block;
+    }
+
+    /* Insight pill below charts */
+    .chart-insight {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 14px;
+      padding: 10px 14px;
+      background: rgba(139,92,246,0.07);
+      border: 1px solid rgba(139,92,246,0.15);
+      border-radius: 10px;
+      font-size: 0.78rem;
+      color: var(--text-2, #a1a1aa);
+      line-height: 1.6;
+    }
+
+    .chart-insight strong {
+      color: var(--accent-light, #a78bfa);
+    }
+
+    .insight-icon {
+      font-size: 1rem;
+      flex-shrink: 0;
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="bg-canvas" aria-hidden="true"></canvas>
+
+<div class="page-wrap">
+
+  <!-- ── HEADER ──────────────────────────────────────── -->
+  <header class="site-header">
+    <a href="/" class="site-logo" aria-label="OncoSense Home">
+      <span class="logo-name">OncoSense</span>
+      <span class="logo-tag">v3.0</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/" class="active">Predictor</a>
+      <a href="/explore">Explorer</a>
+    </nav>
+    <div class="header-info">
+      <div class="header-stat">
+        <div class="stat-value">{{ sensitive_count }}</div>
+        <div class="stat-label">Sensitive</div>
+      </div>
+      <div class="header-stat">
+        <div class="stat-value">{{ resistant_count }}</div>
+        <div class="stat-label">Resistant</div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ── RESULT MAIN ─────────────────────────────────── -->
+  <main class="result-page">
+
+    <a href="/" class="result-crumb animate-in">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M19 12H5M12 5l-7 7 7 7"/></svg>
+      New Prediction
+    </a>
+
+    <!-- ── HERO RESULT ────────────────────────────────── -->
+    <div class="result-header animate-in delay-1">
+      <div
+        class="sensitivity-badge {{ 'sensitive' if sensitivity == 'Sensitive' else 'resistant' }}"
+        role="status"
+        aria-label="Prediction result: {{ sensitivity }}"
+      >
+        <div class="badge-icon" aria-hidden="true">
+          {{ '✅' if sensitivity == 'Sensitive' else '⛔' }}
+        </div>
+        <div class="badge-verdict">{{ sensitivity }}</div>
+        <div class="badge-label">Predicted Drug Response</div>
+      </div>
+
+      <p class="result-context">
+        <strong>{{ cell_line }}</strong> shows predicted
+        <strong style="color: {{ 'var(--emerald)' if sensitivity == 'Sensitive' else 'var(--rose)' }}">{{ sensitivity | lower }}</strong>
+        response to <strong>{{ drug }}</strong>
+      </p>
+    </div>
+
+    <!-- ── AI CLINICAL INSIGHTS ───────────────────────── -->
+    <div class="ai-insights-card animate-in delay-2" id="ai-insights-container">
+      <div class="ai-header">
+        <div class="ai-icon" aria-hidden="true">✨</div>
+        AI Clinical Insights
+      </div>
+      <div id="ai-loading" class="ai-loading">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spin" aria-hidden="true" style="animation: spin 1s linear infinite;">
+          <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+          <style>@keyframes spin { 100% { transform: rotate(360deg); } }</style>
+        </svg>
+        Analysing pharmacological mechanisms…
+        <div class="ai-shimmer"></div>
+      </div>
+      <div id="ai-content" class="ai-content" style="display:none;" aria-live="polite"></div>
+    </div>
+
+    <!-- ── STAT CARDS ─────────────────────────────────── -->
+    <div class="stats-row animate-in delay-3">
+      <div class="stat-card sensitive-card">
+        <div class="card-value" id="stat-sensitive">{{ sensitive_count }}</div>
+        <div class="card-label">Sensitive Lines</div>
+      </div>
+      <div class="stat-card resistant-card">
+        <div class="card-value" id="stat-resistant">{{ resistant_count }}</div>
+        <div class="card-label">Resistant Lines</div>
+      </div>
+      <div class="stat-card ic50-card">
+        <div class="card-value" id="stat-ic50">—</div>
+        <div class="card-label">IC50 Value</div>
+      </div>
+      <div class="stat-card threshold-card">
+        <div class="card-value">{{ threshold }}</div>
+        <div class="card-label">Threshold</div>
+      </div>
+    </div>
+
+    <!-- ── TWO-COLUMN: PIE + INFO ─────────────────────── -->
+    <div class="charts-grid animate-in delay-4">
+
+      <!-- Donut chart -->
+      <div class="section-card">
+        <div class="section-header">
+          <h2 class="section-title">
+            <span class="section-icon" aria-hidden="true">🍩</span>
+            Population Split
+          </h2>
+          <span class="section-meta">{{ sensitive_count + resistant_count }} total</span>
+        </div>
+        <div class="chart-container">
+          <div class="chart-donut-wrap">
+            <canvas id="donutChart" width="180" height="180" aria-label="Donut chart showing {{ sensitive_count }} sensitive and {{ resistant_count }} resistant cell lines"></canvas>
+            <div class="chart-donut-center">
+              <div class="donut-pct" id="donut-pct" style="color: {{ 'var(--emerald)' if sensitivity == 'Sensitive' else 'var(--rose)' }}">
+                {{ ((sensitive_count / (sensitive_count + resistant_count)) * 100) | round(0) | int }}%
+              </div>
+              <div class="donut-lbl">Sensitive</div>
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;gap:1.2rem;justify-content:center;margin-top:1.2rem;flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;gap:6px;font-size:0.75rem;color:var(--text-2);">
+            <span style="width:8px;height:8px;border-radius:50%;background:var(--emerald);display:inline-block;"></span>
+            Sensitive ({{ sensitive_count }})
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;font-size:0.75rem;color:var(--text-2);">
+            <span style="width:8px;height:8px;border-radius:50%;background:var(--rose);display:inline-block;"></span>
+            Resistant ({{ resistant_count }})
+          </div>
+        </div>
+      </div>
+
+      <!-- Drug info -->
+      <div class="section-card">
+        <div class="section-header">
+          <h2 class="section-title">
+            <span class="section-icon" aria-hidden="true">💊</span>
+            Drug Information
+          </h2>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:var(--s-6);">
+          <div>
+            <div class="form-section-label">Selected Drug</div>
+            <div style="font-size:1.3rem;font-weight:700;color:var(--text);margin-top:6px;">{{ drug }}</div>
+          </div>
+          <div>
+            <div class="form-section-label">Cell Line</div>
+            <div style="font-size:0.85rem;font-family:var(--mono);color:var(--text-2);margin-top:6px;word-break:break-word;">{{ cell_line }}</div>
+          </div>
+          <div>
+            <div class="form-section-label">Tissue Type</div>
+            <div style="font-size:0.85rem;color:var(--accent-light);margin-top:6px;font-weight:600;">
+              {{ cell_line.split('_')[1:] | join(' ') | lower | title if '_' in cell_line else 'Unknown' }}
+            </div>
+          </div>
+          <div>
+            <div class="form-section-label">Interpretation</div>
+            <div style="font-size:0.82rem;color:var(--text-2);margin-top:6px;line-height:1.7;">
+              {% if sensitivity == 'Sensitive' %}
+                A higher IC50 indicates the drug is effective at inhibiting this cell line's growth — a <strong style="color:var(--emerald)">sensitive</strong> response.
+              {% else %}
+                A lower IC50 means large quantities of the drug are required — indicating a <strong style="color:var(--rose)">resistant</strong> phenotype.
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /charts-grid -->
+
+    <!-- ════════════════════════════════════════════════════ -->
+    <!-- ── CHART 1: DOSE-RESPONSE CURVE ─────────────────── -->
+    <!-- ════════════════════════════════════════════════════ -->
+    <div class="section-card animate-in delay-5" id="dose-response-section">
+      <div class="section-header">
+        <h2 class="section-title">
+          <span class="section-icon" aria-hidden="true">📈</span>
+          Dose-Response Curve
+        </h2>
+        <span class="section-meta">Hill Equation Model · {{ drug }}</span>
+      </div>
+      <p style="font-size:0.78rem;color:var(--text-3);margin-bottom:var(--s-4);line-height:1.7;">
+        Simulated sigmoid dose-response based on the predicted IC50 using the Hill equation. The vertical dashed line marks this cell line's IC50 — the concentration at which 50% inhibition is achieved.
+      </p>
+      <div id="dose-response-chart" class="plotly-chart-container" aria-label="Dose-response sigmoid curve for {{ drug }} on {{ cell_line }}"></div>
+      <div class="chart-insight" id="dose-insight">
+        <span class="insight-icon">💡</span>
+        <span id="dose-insight-text">Loading curve…</span>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════ -->
+    <!-- ── CHART 2: DRUG IC50 DISTRIBUTION ──────────────── -->
+    <!-- ════════════════════════════════════════════════════ -->
+    <div class="section-card animate-in delay-5" id="distribution-section">
+      <div class="section-header">
+        <h2 class="section-title">
+          <span class="section-icon" aria-hidden="true">🎻</span>
+          Drug IC50 Distribution
+        </h2>
+        <span class="section-meta">All cell lines · {{ drug }}</span>
+      </div>
+      <p style="font-size:0.78rem;color:var(--text-3);margin-bottom:var(--s-4);line-height:1.7;">
+        Box plot showing the spread of IC50 values for <strong style="color:var(--text-2);">{{ drug }}</strong> across all cell lines in the dataset. The highlighted marker shows where <strong style="color:var(--accent-light);">{{ cell_line.split('_')[0] }}</strong> sits in the distribution.
+      </p>
+      <div id="distribution-chart" class="plotly-chart-container" style="min-height:320px;" aria-label="IC50 distribution box plot for {{ drug }}"></div>
+      <div class="chart-insight" id="dist-insight">
+        <span class="insight-icon">📊</span>
+        <span id="dist-insight-text">Calculating percentile…</span>
+      </div>
+    </div>
+
+    <!-- ── COMBINATION THERAPIES ──────────────────────────── -->
+    <div class="section-card animate-in delay-6" id="combinations-section">
+      <div class="section-header">
+        <h2 class="section-title">
+          <span class="section-icon" aria-hidden="true">⚗️</span>
+          Recommended Combinations
+        </h2>
+        <span class="section-meta">AI Synergistic Rationale</span>
+      </div>
+      
+      <div id="combo-loading" style="display:flex;align-items:center;gap:12px;color:var(--accent-light);font-size:0.85rem;font-family:var(--mono);margin-top:var(--s-4);">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spin" aria-hidden="true" style="animation: spin 1s linear infinite;">
+          <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+        </svg>
+        Analysing combinatorial synergy…
+      </div>
+      <div id="combo-shimmer-container" class="combo-grid">
+        <div class="ai-shimmer" style="height:140px;margin-top:0;"></div>
+        <div class="ai-shimmer" style="height:140px;margin-top:0;"></div>
+        <div class="ai-shimmer" style="height:140px;margin-top:0;"></div>
+      </div>
+      
+      <div id="combo-content" class="combo-grid" style="display:none;" aria-live="polite"></div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════ -->
+    <!-- ── CHART 3: DRUG RANK SCATTER ───────────────────── -->
+    <!-- ════════════════════════════════════════════════════ -->
+    <div class="section-card animate-in delay-7" id="drug-rank-section">
+      <div class="section-header">
+        <h2 class="section-title">
+          <span class="section-icon" aria-hidden="true">🔬</span>
+          Full Drug Sensitivity Landscape
+        </h2>
+        <span class="section-meta">All {{ all_drugs | length }} drugs · {{ cell_line.split('_')[0] }}</span>
+      </div>
+      <p style="font-size:0.78rem;color:var(--text-3);margin-bottom:var(--s-4);line-height:1.7;">
+        IC50 values for all drugs against this cell line, ranked from most sensitive to most resistant. Green dots are above the sensitivity threshold; red dots are below. The selected drug is highlighted in yellow.
+      </p>
+      <div id="drug-rank-chart" class="plotly-chart-container tall" aria-label="Drug sensitivity scatter plot for {{ cell_line }}"></div>
+      <div class="chart-insight" id="rank-insight">
+        <span class="insight-icon">🎯</span>
+        <span id="rank-insight-text">Ranking drugs…</span>
+      </div>
+    </div>
+
+    <!-- ── CELL LINES SECTION ─────────────────────────── -->
+    <div class="section-card animate-in delay-7">
+      <div class="section-header">
+        <h2 class="section-title">
+          <span class="section-icon" aria-hidden="true">🔬</span>
+          Cell Line Details
+        </h2>
+        <button
+          class="btn-toggle"
+          id="toggle-btn"
+          onclick="toggleCellLines()"
+          aria-expanded="false"
+          aria-controls="cell-lines-panel"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M9 18l6-6-6-6"/>
+          </svg>
+          Show All Cell Lines
+          <svg class="toggle-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M6 9l6 6 6-6"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="collapsible-panel" id="cell-lines-panel" aria-hidden="true">
+        <div class="cell-lines-grid" style="padding-top:var(--s-4);">
+
+          <div class="cell-list-group">
+            <div class="cell-list-header">
+              <span class="cell-list-dot s" aria-hidden="true"></span>
+              <span class="cell-list-title">Sensitive Cell Lines</span>
+              <span class="cell-list-count">{{ sensitive_count }}</span>
+            </div>
+            <div class="cell-items" role="list" aria-label="Sensitive cell lines">
+              {% for cl in sensitive_cell_lines %}
+              <div class="cell-item" role="listitem">{{ cl }}</div>
+              {% endfor %}
+            </div>
+          </div>
+
+          <div class="cell-list-group">
+            <div class="cell-list-header">
+              <span class="cell-list-dot r" aria-hidden="true"></span>
+              <span class="cell-list-title">Resistant Cell Lines</span>
+              <span class="cell-list-count">{{ resistant_count }}</span>
+            </div>
+            <div class="cell-items" role="list" aria-label="Resistant cell lines">
+              {% for cl in resistant_cell_lines %}
+              <div class="cell-item" role="listitem">{{ cl }}</div>
+              {% endfor %}
+            </div>
+          </div>
+
+        </div><!-- /cell-lines-grid -->
+
+        <div class="download-row">
+          <a
+            href="{{ url_for('download_sensitive_csv', cell_line=cell_line, selected_drug=drug) }}?threshold={{ threshold }}"
+            class="btn-download sensitive-dl"
+            aria-label="Download list of sensitive cell lines as CSV"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+            </svg>
+            Sensitive Lines CSV
+          </a>
+          <a
+            href="{{ url_for('download_resistant_csv', cell_line=cell_line, selected_drug=drug) }}?threshold={{ threshold }}"
+            class="btn-download resistant-dl"
+            aria-label="Download list of resistant cell lines as CSV"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+            </svg>
+            Resistant Lines CSV
+          </a>
+        </div>
+      </div><!-- /collapsible-panel -->
+    </div>
+
+    <a href="/" class="btn-back">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <path d="M19 12H5M12 5l-7 7 7 7"/>
+      </svg>
+      Run Another Prediction
+    </a>
+
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-note">
+      <strong>OncoSense</strong> — Powered by CaDRReS
+    </div>
+    <div class="footer-note">
+      Dataset: CCLE · For research use only
+    </div>
+  </footer>
+
+</div><!-- /page-wrap -->
+
+<!-- Hidden data from Flask -->
+<script id="flask-data" type="application/json">
+{
+  "sensitivity":     "{{ sensitivity }}",
+  "sensitiveCount":  {{ sensitive_count }},
+  "resistantCount":  {{ resistant_count }},
+  "drug":            {{ drug | tojson }},
+  "cellLine":        {{ cell_line | tojson }},
+  "threshold":       {{ threshold }},
+  "allDrugs":        {{ all_drugs | tojson }},
+  "allIC50":         {{ all_ic50 | tojson }},
+  "currentIC50":     {{ current_ic50 }}
+}
+</script>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+// SHARED DATA & CONFIG
+// ═══════════════════════════════════════════════════════════
+const DATA = JSON.parse(document.getElementById('flask-data').textContent);
+document.getElementById('stat-ic50').textContent = DATA.currentIC50.toFixed(2);
+
+// Dark-theme Plotly config shared across all charts
+const PLOTLY_CONFIG = {
+  responsive:  true,
+  displaylogo: false,
+  modeBarButtonsToRemove: ['select2d', 'lasso2d'],
+  toImageButtonOptions: { format: 'png', scale: 2, filename: 'oncosense_chart' },
+};
+
+const DARK_BASE = {
+  paper_bgcolor: 'transparent',
+  plot_bgcolor:  'transparent',
+  font: { family: 'Plus Jakarta Sans, system-ui, sans-serif', color: '#a1a1aa', size: 11 },
+  hoverlabel: {
+    bgcolor:     '#141418',
+    bordercolor: 'rgba(139,92,246,0.35)',
+    font:        { family: 'Plus Jakarta Sans, sans-serif', size: 12, color: '#fafafa' },
+  },
+};
+
+// Palette
+const C_PURPLE  = '#8b5cf6';
+const C_EMERALD = '#34d399';
+const C_ROSE    = '#fb7185';
+const C_AMBER   = '#fbbf24';
+const C_INDIGO  = '#a78bfa';
+const C_DIM     = 'rgba(255,255,255,0.04)';
+const C_LINE    = 'rgba(255,255,255,0.08)';
+
+
+// ═══════════════════════════════════════════════════════════
+// CHART 1 — DOSE-RESPONSE SIGMOID CURVE
+// (Hill Equation: Effect = C^n / (IC50^n + C^n))
+// ═══════════════════════════════════════════════════════════
+(function renderDoseResponse() {
+  const ic50      = DATA.currentIC50;
+  const threshold = DATA.threshold;
+  const drug      = DATA.drug;
+  const n         = 1.5;   // Hill coefficient (standard assumption)
+  const isSens    = DATA.sensitivity === 'Sensitive';
+
+  // Generate concentration range: 0.01 to 3× max(IC50, threshold)
+  const cMax  = Math.max(ic50, threshold) * 3;
+  const steps = 200;
+  const concs = Array.from({ length: steps }, (_, i) => (i / (steps - 1)) * cMax);
+  // Avoid 0 for log plots — start from a tiny value
+  concs[0] = 0.001;
+
+  // Hill equation: fraction inhibited
+  const effects = concs.map(c => (Math.pow(c, n) / (Math.pow(ic50, n) + Math.pow(c, n))) * 100);
+
+  // Main sigmoid trace
+  const traceCurve = {
+    type: 'scatter',
+    mode: 'lines',
+    x: concs,
+    y: effects,
+    name: `${drug} Response`,
+    line: {
+      color: isSens ? C_EMERALD : C_ROSE,
+      width: 3,
+      shape: 'spline',
+    },
+    hovertemplate: '<b>Concentration:</b> %{x:.3f}<br><b>Inhibition:</b> %{y:.1f}%<extra></extra>',
+  };
+
+  // IC50 marker — vertical dashed line via shape + a scatter point at (IC50, 50%)
+  const traceIC50Point = {
+    type: 'scatter',
+    mode: 'markers+text',
+    x: [ic50],
+    y: [50],
+    name: 'IC50',
+    text: [`IC50 = ${ic50.toFixed(2)}`],
+    textposition: 'top right',
+    textfont: { color: C_AMBER, size: 11, family: 'JetBrains Mono, monospace' },
+    marker: { color: C_AMBER, size: 10, symbol: 'circle', line: { color: '#141418', width: 2 } },
+    hovertemplate: `<b>IC50</b>: ${ic50.toFixed(3)}<br>Effect: 50%<extra></extra>`,
+  };
+
+  // Threshold line annotation
+  const thresholdEffect = (Math.pow(threshold, n) / (Math.pow(ic50, n) + Math.pow(threshold, n))) * 100;
+  const traceThresholdPoint = {
+    type: 'scatter',
+    mode: 'markers+text',
+    x: [threshold],
+    y: [thresholdEffect],
+    name: 'Threshold',
+    text: [`Threshold = ${threshold}`],
+    textposition: 'bottom right',
+    textfont: { color: C_PURPLE, size: 10, family: 'JetBrains Mono, monospace' },
+    marker: { color: C_PURPLE, size: 8, symbol: 'diamond', line: { color: '#141418', width: 2 } },
+    hovertemplate: `<b>Threshold</b>: ${threshold}<br>Effect: ${thresholdEffect.toFixed(1)}%<extra></extra>`,
+  };
+
+  // Fill under curve for sensitive region
+  const sensitiveConcs  = concs.filter(c => c <= cMax);
+  const sensitiveEffect = sensitiveConcs.map(c => (Math.pow(c, n) / (Math.pow(ic50, n) + Math.pow(c, n))) * 100);
+  const traceFill = {
+    type: 'scatter',
+    mode: 'lines',
+    x: sensitiveConcs,
+    y: sensitiveEffect,
+    fill: 'tozeroy',
+    fillcolor: isSens ? 'rgba(52,211,153,0.07)' : 'rgba(251,113,133,0.07)',
+    line: { color: 'transparent' },
+    showlegend: false,
+    hoverinfo: 'skip',
+  };
+
+  const layout = {
+    ...DARK_BASE,
+    height: 340,
+    margin: { l: 54, r: 24, t: 16, b: 54 },
+    xaxis: {
+      title: { text: 'Drug Concentration (relative units)', font: { color: '#71717a', size: 10 } },
+      tickfont:  { color: '#71717a', size: 9 },
+      gridcolor: C_DIM,
+      linecolor: C_LINE,
+      zeroline:  false,
+    },
+    yaxis: {
+      title:    { text: '% Inhibition', font: { color: '#71717a', size: 10 } },
+      tickfont: { color: '#71717a', size: 9 },
+      gridcolor: C_DIM,
+      linecolor: C_LINE,
+      range: [0, 105],
+    },
+    shapes: [
+      // Vertical line at IC50
+      {
+        type: 'line', xref: 'x', yref: 'paper',
+        x0: ic50, x1: ic50, y0: 0, y1: 1,
+        line: { color: C_AMBER, width: 1.5, dash: 'dash' },
+      },
+      // Horizontal 50% line
+      {
+        type: 'line', xref: 'paper', yref: 'y',
+        x0: 0, x1: 1, y0: 50, y1: 50,
+        line: { color: 'rgba(255,255,255,0.12)', width: 1, dash: 'dot' },
+      },
+      // Vertical line at threshold
+      {
+        type: 'line', xref: 'x', yref: 'paper',
+        x0: threshold, x1: threshold, y0: 0, y1: 1,
+        line: { color: C_PURPLE, width: 1, dash: 'dot' },
+      },
+    ],
+    legend: {
+      font:    { color: '#a1a1aa', size: 10 },
+      bgcolor: 'rgba(0,0,0,0)',
+      x: 0.01, y: 0.98,
+    },
+    showlegend: true,
+  };
+
+  Plotly.newPlot('dose-response-chart', [traceFill, traceCurve, traceIC50Point, traceThresholdPoint], layout, PLOTLY_CONFIG);
+
+  // Insight text
+  const pctAt50   = 50;
+  const sensitiveLabel = isSens ? 'sensitive' : 'resistant';
+  const insightText = isSens
+    ? `At its predicted IC50 of <strong>${ic50.toFixed(2)}</strong>, ${DATA.cellLine.split('_')[0]} achieves 50% inhibition — above the sensitivity threshold of ${threshold}, confirming a <strong style="color:${C_EMERALD}">sensitive</strong> phenotype.`
+    : `With an IC50 of <strong>${ic50.toFixed(2)}</strong> (below the threshold of ${threshold}), a much higher concentration is needed for 50% inhibition, marking this cell line as <strong style="color:${C_ROSE}">resistant</strong>.`;
+  document.getElementById('dose-insight-text').innerHTML = insightText;
+})();
+
+
+// ═══════════════════════════════════════════════════════════
+// CHART 2 — DRUG IC50 DISTRIBUTION (BOX + STRIP)
+// ═══════════════════════════════════════════════════════════
+(function renderDistribution() {
+  const allIC50   = DATA.allIC50;       // All IC50s for this cell line (all drugs)
+  const allDrugs  = DATA.allDrugs;
+  const threshold = DATA.threshold;
+  const currentIC50 = DATA.currentIC50;
+  const drug      = DATA.drug;
+  const isSens    = DATA.sensitivity === 'Sensitive';
+
+  // Find index of selected drug — get ALL cell lines' values for THIS drug
+  // We only have the current cell line's IC50s for all drugs, NOT all cell lines for one drug.
+  // However, we can show the distribution of ALL drugs for this cell line instead —
+  // showing where the selected drug ranks among other drugs.
+  // This gives a useful "which drugs work best" picture.
+
+  // Sort by IC50 descending
+  const pairs = allDrugs.map((d, i) => ({ drug: d, ic50: allIC50[i] }));
+  const sorted = [...pairs].sort((a, b) => b.ic50 - a.ic50);
+
+  const q1 = percentile(allIC50, 25);
+  const median = percentile(allIC50, 50);
+  const q3 = percentile(allIC50, 75);
+  const minV = Math.min(...allIC50);
+  const maxV = Math.max(...allIC50);
+
+  function percentile(arr, p) {
+    const s = [...arr].sort((a, b) => a - b);
+    const idx = (p / 100) * (s.length - 1);
+    const lo = Math.floor(idx), hi = Math.ceil(idx);
+    return s[lo] + (s[hi] - s[lo]) * (idx - lo);
+  }
+
+  // Box trace
+  const traceBox = {
+    type: 'box',
+    y: allIC50,
+    name: `All Drugs (${allDrugs.length})`,
+    boxpoints: 'all',
+    jitter: 0.4,
+    pointpos: 0,
+    marker: {
+      color: allIC50.map(v => v > threshold ? 'rgba(52,211,153,0.6)' : 'rgba(251,113,133,0.5)'),
+      size: 5,
+      line: { color: 'rgba(255,255,255,0.1)', width: 0.5 },
+    },
+    line: { color: C_PURPLE },
+    fillcolor: 'rgba(139,92,246,0.12)',
+    boxmean: 'sd',
+    hovertemplate: 'IC50: %{y:.3f}<extra></extra>',
+  };
+
+  // Highlight current drug as special marker
+  const traceHighlight = {
+    type: 'scatter',
+    mode: 'markers+text',
+    y: [currentIC50],
+    x: [0],
+    name: drug,
+    text: [drug],
+    textposition: 'middle right',
+    textfont: { color: C_AMBER, size: 11, family: 'JetBrains Mono, monospace' },
+    marker: {
+      color: C_AMBER,
+      size: 14,
+      symbol: 'star',
+      line: { color: '#141418', width: 2 },
+    },
+    hovertemplate: `<b>${drug}</b><br>IC50: ${currentIC50.toFixed(3)}<br>${isSens ? '✅ Sensitive' : '⛔ Resistant'}<extra></extra>`,
+  };
+
+  const layout = {
+    ...DARK_BASE,
+    height: 320,
+    margin: { l: 54, r: 24, t: 16, b: 40 },
+    xaxis: {
+      showticklabels: false,
+      zeroline: false,
+      gridcolor: C_DIM,
+    },
+    yaxis: {
+      title: { text: 'IC50 Value', font: { color: '#71717a', size: 10 } },
+      tickfont: { color: '#71717a', size: 9 },
+      gridcolor: C_DIM,
+      linecolor: C_LINE,
+    },
+    shapes: [
+      // Threshold line
+      {
+        type: 'line', xref: 'paper', yref: 'y',
+        x0: 0, x1: 1, y0: threshold, y1: threshold,
+        line: { color: C_PURPLE, width: 1.5, dash: 'dot' },
+      },
+    ],
+    annotations: [{
+      xref: 'paper', yref: 'y',
+      x: 1, y: threshold,
+      xanchor: 'right', yanchor: 'bottom',
+      text: `Threshold: ${threshold}`,
+      showarrow: false,
+      font: { color: C_INDIGO, size: 9, family: 'JetBrains Mono, monospace' },
+    }],
+    legend: { font: { color: '#a1a1aa', size: 10 }, bgcolor: 'rgba(0,0,0,0)', x: 0.01, y: 0.99 },
+    showlegend: true,
+  };
+
+  Plotly.newPlot('distribution-chart', [traceBox, traceHighlight], layout, PLOTLY_CONFIG);
+
+  // Insight — find rank of selected drug by IC50 among all drugs (sorted descending)
+  const drugIndex = allDrugs.indexOf(drug);
+  const drugIC50Val = drugIndex >= 0 ? allIC50[drugIndex] : currentIC50;
+  const sortedDesc = [...allIC50].sort((a, b) => b - a);
+  // rank = how many drugs have a strictly higher IC50 + 1
+  const rank = sortedDesc.filter(v => v > drugIC50Val + 1e-9).length + 1;
+  const total = allIC50.length;
+  const pct = Math.round((rank / total) * 100);
+  const distInsight = `<strong>${drug}</strong> ranks <strong>#${rank} of ${total}</strong> drugs by IC50 for this cell line. Median IC50 across all drugs: <strong>${median.toFixed(2)}</strong>. The ⭐ star shows where <strong>${DATA.cellLine.split('_')[0]}</strong> sits in the distribution.`;
+  document.getElementById('dist-insight-text').innerHTML = distInsight;
+})();
+
+
+// ═══════════════════════════════════════════════════════════
+// CHART 3 — DRUG RANK SCATTER (replaces bar list)
+// ═══════════════════════════════════════════════════════════
+(function renderDrugRankScatter() {
+  const allIC50   = DATA.allIC50;
+  const allDrugs  = DATA.allDrugs;
+  const threshold = DATA.threshold;
+  const drug      = DATA.drug;
+  const currentIC50 = DATA.currentIC50;
+
+  // Sort by IC50 descending
+  const pairs = allDrugs.map((d, i) => ({ drug: d, ic50: allIC50[i] }));
+  pairs.sort((a, b) => b.ic50 - a.ic50);
+
+  const xLabels   = pairs.map((_, i) => i + 1);       // rank numbers
+  const drugNames = pairs.map(p => p.drug);
+  const ic50Vals  = pairs.map(p => p.ic50);
+  const isSensArr = pairs.map(p => p.ic50 > threshold);
+  const isCurrentArr = pairs.map(p => p.drug === drug);
+
+  // Split into 3 series: sensitive, resistant, selected-drug
+  const sensPairs = pairs.filter(p => p.ic50 > threshold && p.drug !== drug);
+  const resPairs  = pairs.filter(p => p.ic50 <= threshold && p.drug !== drug);
+  const currPair  = pairs.find(p => p.drug === drug);
+  const currRank  = pairs.findIndex(p => p.drug === drug) + 1;
+
+  function makeTrace(pts, name, color, symbol, size, opacity) {
+    return {
+      type: 'scatter',
+      mode: 'markers',
+      name,
+      x: pts.map((_, i) => pairs.findIndex(p => p.drug === pts[i].drug) + 1),
+      y: pts.map(p => p.ic50),
+      text: pts.map(p => p.drug),
+      marker: {
+        color,
+        size,
+        symbol,
+        opacity,
+        line: { color: 'rgba(0,0,0,0.3)', width: 1 },
+      },
+      hovertemplate: '<b>%{text}</b><br>Rank: %{x}<br>IC50: %{y:.3f}<extra></extra>',
+    };
+  }
+
+  const traceSens = makeTrace(sensPairs, 'Sensitive', C_EMERALD, 'circle', 9, 0.8);
+  const traceRes  = makeTrace(resPairs,  'Resistant',  C_ROSE,    'circle', 9, 0.8);
+
+  // Current drug (highlighted separately)
+  const traceCurr = {
+    type: 'scatter',
+    mode: 'markers+text',
+    name: drug,
+    x: [currRank],
+    y: [currentIC50],
+    text: [drug],
+    textposition: currRank < pairs.length / 2 ? 'top right' : 'top left',
+    textfont: { color: C_AMBER, size: 11, family: 'JetBrains Mono, monospace' },
+    marker: {
+      color: C_AMBER,
+      size: 16,
+      symbol: 'star',
+      line: { color: '#141418', width: 2 },
+    },
+    hovertemplate: `<b>${drug}</b> (selected)<br>Rank: ${currRank}<br>IC50: ${currentIC50.toFixed(3)}<extra></extra>`,
+  };
+
+  const layout = {
+    ...DARK_BASE,
+    height: 420,
+    margin: { l: 54, r: 24, t: 16, b: 64 },
+    xaxis: {
+      title: { text: 'Drug Rank (most sensitive → most resistant)', font: { color: '#71717a', size: 10 } },
+      tickfont: { color: '#71717a', size: 9 },
+      gridcolor: C_DIM,
+      linecolor: C_LINE,
+      zeroline: false,
+    },
+    yaxis: {
+      title: { text: 'Predicted IC50', font: { color: '#71717a', size: 10 } },
+      tickfont: { color: '#71717a', size: 9 },
+      gridcolor: C_DIM,
+      linecolor: C_LINE,
+    },
+    shapes: [
+      // Threshold line
+      {
+        type: 'line', xref: 'paper', yref: 'y',
+        x0: 0, x1: 1, y0: threshold, y1: threshold,
+        line: { color: C_PURPLE, width: 1.5, dash: 'dot' },
+      },
+    ],
+    annotations: [{
+      xref: 'paper', yref: 'y',
+      x: 0.01, y: threshold,
+      xanchor: 'left', yanchor: 'bottom',
+      text: `Sensitivity threshold: ${threshold}`,
+      showarrow: false,
+      font: { color: C_INDIGO, size: 9, family: 'JetBrains Mono, monospace' },
+    }],
+    legend: { font: { color: '#a1a1aa', size: 10 }, bgcolor: 'rgba(0,0,0,0)', x: 0.01, y: 0.99 },
+    showlegend: true,
+  };
+
+  Plotly.newPlot('drug-rank-chart', [traceSens, traceRes, traceCurr], layout, PLOTLY_CONFIG);
+
+  // Insight
+  const sensitiveCount = sensPairs.length + (currentIC50 > threshold ? 1 : 0);
+  const resistantCount = pairs.length - sensitiveCount;
+  const rankInsight = `${DATA.cellLine.split('_')[0]} is sensitive to <strong style="color:${C_EMERALD}">${sensitiveCount} of ${pairs.length}</strong> drugs. <strong>${drug}</strong> ranks <strong>#${currRank}</strong> overall. ${currRank <= 3 ? `🏆 It is among the <strong>top 3 most effective</strong> drugs for this cell line!` : currRank >= pairs.length - 2 ? `⚠️ This drug ranks near the <strong>bottom</strong> — other drugs may be more effective.` : `It sits in the <strong>middle of the pack</strong>.`}`;
+  document.getElementById('rank-insight-text').innerHTML = rankInsight;
+})();
+
+
+// ─── DONUT CHART ─────────────────────────────────────────
+(function() {
+  const ctx = document.getElementById('donutChart').getContext('2d');
+  new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['Sensitive', 'Resistant'],
+      datasets: [{
+        data: [DATA.sensitiveCount, DATA.resistantCount],
+        backgroundColor: ['rgba(52,211,153,0.85)', 'rgba(251,113,133,0.85)'],
+        borderColor:     ['rgba(52,211,153,0.15)', 'rgba(251,113,133,0.15)'],
+        borderWidth: 2,
+        hoverOffset: 6,
+      }]
+    },
+    options: {
+      cutout: '70%',
+      plugins: { legend: { display: false }, tooltip: {
+        callbacks: {
+          label: (ctx) => ` ${ctx.label}: ${ctx.parsed} (${((ctx.parsed / (DATA.sensitiveCount + DATA.resistantCount)) * 100).toFixed(1)}%)`
+        },
+        backgroundColor: '#141418',
+        borderColor: 'rgba(139,92,246,0.2)',
+        borderWidth: 1,
+        titleColor: '#fafafa',
+        bodyColor: '#a1a1aa',
+        padding: 10,
+        cornerRadius: 8,
+      }},
+      animation: { duration: 900, easing: 'easeOutQuart' },
+    }
+  });
+})();
+
+// ─── COLLAPSIBLE CELL LINES ──────────────────────────────
+function toggleCellLines() {
+  const panel  = document.getElementById('cell-lines-panel');
+  const btn    = document.getElementById('toggle-btn');
+  const isOpen = panel.classList.contains('open');
+
+  if (isOpen) {
+    panel.style.maxHeight = panel.scrollHeight + 'px';
+    requestAnimationFrame(() => {
+      panel.style.maxHeight = '0';
+      panel.classList.remove('open');
+      btn.classList.remove('open');
+      btn.setAttribute('aria-expanded', 'false');
+      panel.setAttribute('aria-hidden', 'true');
+    });
+  } else {
+    panel.classList.add('open');
+    btn.classList.add('open');
+    btn.setAttribute('aria-expanded', 'true');
+    panel.setAttribute('aria-hidden', 'false');
+    panel.style.maxHeight = panel.scrollHeight + 'px';
+  }
+}
+
+// ─── STAGGER STAT CARDS ──────────────────────────────────
+(function() {
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.style.opacity = '1';
+        entry.target.style.transform = 'translateY(0)';
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.1 });
+
+  document.querySelectorAll('.stat-card').forEach((card, i) => {
+    card.style.opacity = '0';
+    card.style.transform = 'translateY(16px)';
+    card.style.transition = `opacity 0.5s ease ${i * 0.08}s, transform 0.5s cubic-bezier(0.22,1,0.36,1) ${i * 0.08}s`;
+    observer.observe(card);
+  });
+})();
+
+// ─── AMBIENT CANVAS ──────────────────────────────────────
+(function initCanvas() {
+  const canvas = document.getElementById('bg-canvas');
+  const ctx    = canvas.getContext('2d');
+  let W, H, nodes, animId;
+
+  function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
+  function createNodes() {
+    nodes = Array.from({ length: 45 }, () => ({
+      x: Math.random()*W, y: Math.random()*H,
+      vx: (Math.random()-0.5)*0.22, vy: (Math.random()-0.5)*0.22,
+      r: 1+Math.random()*1.5,
+    }));
+  }
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    for (const n of nodes) { n.x+=n.vx; n.y+=n.vy; if(n.x<0||n.x>W)n.vx*=-1; if(n.y<0||n.y>H)n.vy*=-1; }
+    for (let i=0;i<nodes.length;i++) for (let j=i+1;j<nodes.length;j++) {
+      const dx=nodes[i].x-nodes[j].x,dy=nodes[i].y-nodes[j].y,d=Math.sqrt(dx*dx+dy*dy);
+      if(d<120){const a=(1-d/120)*0.15;ctx.strokeStyle=`rgba(139,92,246,${a})`;ctx.lineWidth=0.5;ctx.beginPath();ctx.moveTo(nodes[i].x,nodes[i].y);ctx.lineTo(nodes[j].x,nodes[j].y);ctx.stroke();}
+    }
+    for (const n of nodes) { ctx.beginPath();ctx.arc(n.x,n.y,n.r,0,Math.PI*2);ctx.fillStyle='rgba(139,92,246,0.4)';ctx.fill(); }
+    animId=requestAnimationFrame(draw);
+  }
+  window.addEventListener('resize',()=>{cancelAnimationFrame(animId);resize();draw();});
+  resize();createNodes();draw();
+})();
+
+// ─── AI INSIGHTS GENERATOR ───────────────────────────────
+(async function fetchAIExplanation() {
+  const loader  = document.getElementById('ai-loading');
+  const content = document.getElementById('ai-content');
+
+  const payload = {
+    cell_line:   DATA.cellLine,
+    drug:        DATA.drug,
+    ic50:        DATA.currentIC50,
+    sensitivity: DATA.sensitivity,
+    tissue:      DATA.cellLine.includes('_') ? DATA.cellLine.split('_').slice(1).join(' ') : 'Unknown'
+  };
+
+  try {
+    const res    = await fetch('/api/explain', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const result = await res.json();
+    loader.style.display  = 'none';
+    content.style.display = 'block';
+
+    if (result.error) {
+      content.innerHTML = `<span style="color:var(--rose);">AI Insights unavailable: ${result.error}</span>`;
+      return;
+    }
+
+    // Convert basic markdown to HTML tags
+    let text = result.explanation
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.*?)\*/g, '<em>$1</em>');
+    
+    // Display the explanation (typewriter effect removed to prevent HTML tag corruption)
+    content.innerHTML = text;
+  } catch (err) {
+    loader.style.display  = 'none';
+    content.style.display = 'block';
+    content.innerHTML     = `<span style="color:var(--rose);">Failed to connect to AI engine.</span>`;
+  }
+})();
+
+// ─── COMBINATIONS GENERATOR ──────────────────────────────
+(async function fetchCombinations() {
+  const loadingText = document.getElementById('combo-loading');
+  const shimmer     = document.getElementById('combo-shimmer-container');
+  const content     = document.getElementById('combo-content');
+
+  try {
+    const res    = await fetch('/api/combinations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cell_line: DATA.cellLine, threshold: DATA.threshold }) });
+    const result = await res.json();
+    loadingText.style.display = 'none';
+    shimmer.style.display     = 'none';
+    content.style.display     = 'grid';
+
+    if (result.error) {
+      content.innerHTML = `<div style="color:var(--rose);font-size:0.9rem;">Combinations unavailable: ${result.error}</div>`;
+      return;
+    }
+
+    result.combinations.forEach((combo) => {
+      const card = document.createElement('div');
+      card.className = 'combo-card';
+      card.innerHTML = `
+        <div class="combo-header">
+          <div class="combo-drugs">
+            <span>${combo.drug1}</span>
+            <span class="combo-plus">+</span>
+            <span>${combo.drug2}</span>
+          </div>
+          <div class="combo-score">Score: ${combo.score.toFixed(1)}</div>
+        </div>
+        <div class="combo-rationale">${combo.rationale}</div>
+      `;
+      content.appendChild(card);
+    });
+  } catch (err) {
+    loadingText.style.display = 'none';
+    shimmer.style.display     = 'none';
+    content.style.display     = 'block';
+    content.innerHTML = `<div style="color:var(--rose);font-size:0.9rem;">Failed to fetch combinations.</div>`;
+  }
+})();
+</script>
+
+</body>
+</html>

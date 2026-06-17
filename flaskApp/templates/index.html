@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="OncoSense — AI-powered cancer drug response prediction using CaDRReS matrix factorisation on the CCLE dataset." />
+  <title>OncoSense — Cancer Drug Response Predictor</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+
+<!-- Ambient mesh background -->
+<canvas id="bg-canvas" aria-hidden="true"></canvas>
+
+<div class="page-wrap">
+
+  <!-- ── HEADER ──────────────────────────────────────── -->
+  <header class="site-header">
+    <a href="/" class="site-logo" aria-label="OncoSense Home">
+      <span class="logo-name">OncoSense</span>
+      <span class="logo-tag">v3.0</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/" class="active">Predictor</a>
+      <a href="/explore">Explorer</a>
+    </nav>
+    <div class="header-info" aria-label="Dataset statistics">
+      <div class="header-stat">
+        <div class="stat-value">{{ cell_lines | length }}</div>
+        <div class="stat-label">Cell Lines</div>
+      </div>
+      <div class="header-stat">
+        <div class="stat-value">{{ drugs | length }}</div>
+        <div class="stat-label">Drugs</div>
+      </div>
+      <div class="header-stat">
+        <div class="stat-value">CCLE</div>
+        <div class="stat-label">Dataset</div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ── HERO ────────────────────────────────────────── -->
+  <main>
+    <section class="hero animate-in" aria-labelledby="hero-title">
+      <div class="hero-badge" role="status">
+        <span class="pulse-dot" aria-hidden="true"></span>
+        CaDRReS · Matrix Factorisation · CCLE Dataset
+      </div>
+      <h1 class="hero-title" id="hero-title">
+        Predict Cancer<br/>
+        <span class="gradient-text">Drug Response</span>
+      </h1>
+      <p class="hero-subtitle">
+        Select a cancer cell line and a drug to instantly predict sensitivity or resistance,
+        powered by collaborative filtering trained on the Cancer Cell Line Encyclopedia.
+      </p>
+    </section>
+
+    <!-- ── PREDICTION FORM ───────────────────────────── -->
+    <div class="form-card animate-in delay-2" role="form" aria-label="Drug response prediction form">
+
+      <div class="form-grid">
+
+        <!-- Cell Line Search -->
+        <div>
+          <div class="form-section-label" id="cell-line-label">
+            Select Cell Line
+          </div>
+          <div class="search-wrapper" role="combobox" aria-expanded="false" aria-haspopup="listbox" aria-labelledby="cell-line-label">
+            <span class="search-icon" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+              </svg>
+            </span>
+            <input
+              type="text"
+              id="cell-line-search"
+              class="search-input"
+              placeholder="Search cell lines (e.g. LUNG, PC3…)"
+              autocomplete="off"
+              spellcheck="false"
+              aria-autocomplete="list"
+              aria-controls="cell-line-list"
+            />
+            <div id="cell-line-list" class="autocomplete-dropdown" role="listbox" aria-label="Cell line options"></div>
+          </div>
+          <div id="cell-line-selected" class="selected-badge" aria-live="polite">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            <span id="cell-line-selected-text"></span>
+          </div>
+        </div>
+
+        <!-- Drug Search -->
+        <div>
+          <div class="form-section-label" id="drug-label">
+            Select Drug
+          </div>
+          <div class="search-wrapper" role="combobox" aria-expanded="false" aria-haspopup="listbox" aria-labelledby="drug-label">
+            <span class="search-icon" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2v20M2 12h20"/>
+              </svg>
+            </span>
+            <input
+              type="text"
+              id="drug-search"
+              class="search-input"
+              placeholder="Search drugs (e.g. Erlotinib…)"
+              autocomplete="off"
+              spellcheck="false"
+              aria-autocomplete="list"
+              aria-controls="drug-list"
+            />
+            <div id="drug-list" class="autocomplete-dropdown" role="listbox" aria-label="Drug options"></div>
+          </div>
+          <div id="drug-selected" class="selected-badge" aria-live="polite">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            <span id="drug-selected-text"></span>
+          </div>
+        </div>
+
+        <!-- Threshold Slider -->
+        <div>
+          <div class="form-section-label" id="threshold-label">
+            Sensitivity Threshold
+            <span style="color:var(--text-3);font-weight:400;text-transform:none;letter-spacing:0;margin-left:6px;">(IC50 cutoff)</span>
+          </div>
+          <div class="threshold-row">
+            <div>
+              <input
+                type="range"
+                id="threshold-slider"
+                min="0" max="10" step="0.5"
+                value="{{ default_threshold }}"
+                aria-labelledby="threshold-label"
+                aria-valuemin="0" aria-valuemax="10"
+                aria-valuenow="{{ default_threshold }}"
+              />
+              <div class="threshold-hint">
+                IC50 &gt; threshold → Sensitive &nbsp;|&nbsp; IC50 ≤ threshold → Resistant
+              </div>
+            </div>
+            <div>
+              <div class="threshold-display" id="threshold-display" aria-live="polite">{{ default_threshold }}</div>
+              <div class="threshold-hint">Current</div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /form-grid -->
+
+      <!-- Hidden form that actually submits -->
+      <form action="/result" method="post" id="predictionForm" aria-hidden="true">
+        <input type="hidden" name="cell_line" id="cellLineInput" value="" />
+        <input type="hidden" name="drug" id="drugInput" value="" />
+        <input type="hidden" name="threshold" id="thresholdInput" value="{{ default_threshold }}" />
+      </form>
+
+      <button
+        type="button"
+        id="predict-btn"
+        class="btn-predict"
+        onclick="handlePredict()"
+        disabled
+        aria-disabled="true"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M9.663 17h4.673M12 3v1m6.364 1.636-.707.707M21 12h-1M4 12H3m3.343-5.657-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+        </svg>
+        Run Prediction
+        <svg class="btn-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M5 12h14M12 5l7 7-7 7"/>
+        </svg>
+      </button>
+
+    </div><!-- /form-card -->
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-note">
+      <strong>OncoSense</strong> — Powered by CaDRReS (Cancer Drug Response prediction using a Recommender System)
+    </div>
+    <div class="footer-note">
+      Dataset: CCLE · For research use only
+    </div>
+  </footer>
+
+</div><!-- /page-wrap -->
+
+<!-- ── LOADING OVERLAY ────────────────────────────── -->
+<div class="loading-overlay" id="loading-overlay" role="status" aria-live="polite" aria-label="Calculating prediction">
+  <div class="dna-loader" aria-hidden="true">
+    <div class="dna-bar"></div><div class="dna-bar"></div><div class="dna-bar"></div>
+    <div class="dna-bar"></div><div class="dna-bar"></div><div class="dna-bar"></div>
+    <div class="dna-bar"></div><div class="dna-bar"></div><div class="dna-bar"></div>
+  </div>
+  <div class="loading-title">Analysing drug response…</div>
+  <div class="loading-sub">Running matrix factorisation inference</div>
+</div>
+
+<script>
+// ─── DATA from Flask ─────────────────────────────────────
+const CELL_LINES = {{ cell_lines | tojson }};
+const DRUGS      = {{ drugs      | tojson }};
+
+// ─── STATE ───────────────────────────────────────────────
+let selectedCellLine = '';
+let selectedDrug = '';
+
+// ─── AUTOCOMPLETE ENGINE ─────────────────────────────────
+function buildAutocomplete({ inputId, listId, data, onSelect, formatItem }) {
+  const input = document.getElementById(inputId);
+  const list  = document.getElementById(listId);
+  let activeIndex = -1;
+  let filtered = [];
+
+  function render(items) {
+    if (!items.length) {
+      list.innerHTML = `<div class="autocomplete-item" style="color:var(--text-3);cursor:default;">No results found</div>`;
+    } else {
+      list.innerHTML = items.map((item, i) => formatItem(item, input.value.trim(), i)).join('');
+    }
+    list.querySelectorAll('[data-value]').forEach((el) => {
+      el.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        select(el.getAttribute('data-value'));
+      });
+    });
+  }
+
+  function open(items) {
+    filtered = items;
+    activeIndex = -1;
+    render(filtered);
+    list.classList.add('open');
+    input.closest('[role="combobox"]').setAttribute('aria-expanded', 'true');
+  }
+
+  function close() {
+    list.classList.remove('open');
+    input.closest('[role="combobox"]').setAttribute('aria-expanded', 'false');
+    activeIndex = -1;
+  }
+
+  function select(value) {
+    input.value = value;
+    onSelect(value);
+    close();
+  }
+
+  function setActive(index) {
+    const items = list.querySelectorAll('[data-value]');
+    items.forEach(el => el.classList.remove('active'));
+    if (index >= 0 && index < items.length) {
+      items[index].classList.add('active');
+      items[index].scrollIntoView({ block: 'nearest' });
+      activeIndex = index;
+    }
+  }
+
+  input.addEventListener('input', () => {
+    const q = input.value.trim().toLowerCase();
+    if (!q) { close(); return; }
+    const results = data.filter(d => d.toLowerCase().includes(q)).slice(0, 60);
+    open(results);
+  });
+
+  input.addEventListener('focus', () => {
+    const q = input.value.trim().toLowerCase();
+    if (!q) return;
+    const results = data.filter(d => d.toLowerCase().includes(q)).slice(0, 60);
+    if (results.length) open(results);
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (!list.classList.contains('open')) return;
+    const items = list.querySelectorAll('[data-value]');
+    if (e.key === 'ArrowDown') { e.preventDefault(); setActive(Math.min(activeIndex + 1, items.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(Math.max(activeIndex - 1, 0)); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (activeIndex >= 0 && items[activeIndex]) select(items[activeIndex].getAttribute('data-value')); }
+    else if (e.key === 'Escape') close();
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!input.contains(e.target) && !list.contains(e.target)) close();
+  });
+}
+
+// ─── HIGHLIGHT MATCH ─────────────────────────────────────
+function highlight(text, query) {
+  if (!query) return text;
+  const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+  return text.replace(regex, '<mark>$1</mark>');
+}
+
+// ─── CELL LINE AUTOCOMPLETE ──────────────────────────────
+buildAutocomplete({
+  inputId: 'cell-line-search',
+  listId:  'cell-line-list',
+  data:    CELL_LINES,
+  onSelect: (value) => {
+    selectedCellLine = value;
+    document.getElementById('cellLineInput').value = value;
+    const parts = value.split('_');
+    const tissue = parts.slice(1).join(' ').toLowerCase().replace(/_/g, ' ');
+    document.getElementById('cell-line-selected-text').textContent = value + (tissue ? ` · ${tissue}` : '');
+    document.getElementById('cell-line-selected').classList.add('visible');
+    checkReadyState();
+  },
+  formatItem: (item, query) => {
+    const parts = item.split('_');
+    const name = parts[0];
+    const tissue = parts.slice(1).join('_');
+    const tissueLabel = tissue.replace(/_/g, ' ');
+    return `<div class="autocomplete-item" role="option" data-value="${item}" tabindex="-1">
+      <span>${highlight(name, query)}<span style="color:var(--text-3);font-size:0.72rem;"> · ${highlight(tissueLabel, query)}</span></span>
+      <span class="item-tissue">${tissueLabel.split(' ')[0]}</span>
+    </div>`;
+  }
+});
+
+// ─── DRUG AUTOCOMPLETE ───────────────────────────────────
+buildAutocomplete({
+  inputId: 'drug-search',
+  listId:  'drug-list',
+  data:    DRUGS,
+  onSelect: (value) => {
+    selectedDrug = value;
+    document.getElementById('drugInput').value = value;
+    document.getElementById('drug-selected-text').textContent = value;
+    document.getElementById('drug-selected').classList.add('visible');
+    checkReadyState();
+  },
+  formatItem: (item, query) => {
+    return `<div class="autocomplete-item" role="option" data-value="${item}" tabindex="-1">
+      ${highlight(item, query)}
+    </div>`;
+  }
+});
+
+// ─── THRESHOLD SLIDER ────────────────────────────────────
+const slider  = document.getElementById('threshold-slider');
+const display = document.getElementById('threshold-display');
+const hiddenT = document.getElementById('thresholdInput');
+
+function updateThreshold() {
+  const v = parseFloat(slider.value).toFixed(1);
+  display.textContent = v;
+  hiddenT.value = v;
+  slider.setAttribute('aria-valuenow', v);
+}
+
+slider.addEventListener('input', updateThreshold);
+updateThreshold();
+
+// ─── ENABLE / DISABLE PREDICT BUTTON ─────────────────────
+function checkReadyState() {
+  const btn = document.getElementById('predict-btn');
+  const ready = selectedCellLine && selectedDrug;
+  btn.disabled = !ready;
+  btn.setAttribute('aria-disabled', String(!ready));
+}
+checkReadyState();
+
+// ─── SUBMIT ──────────────────────────────────────────────
+function handlePredict() {
+  if (!selectedCellLine || !selectedDrug) return;
+  const overlay = document.getElementById('loading-overlay');
+  overlay.classList.add('active');
+  setTimeout(() => { document.getElementById('predictionForm').submit(); }, 80);
+}
+
+// ─── AMBIENT MESH BACKGROUND ─────────────────────────────
+(function initCanvas() {
+  const canvas = document.getElementById('bg-canvas');
+  const ctx    = canvas.getContext('2d');
+  let W, H, nodes, animId;
+
+  const NODE_COUNT = 50;
+  const MAX_DIST   = 130;
+
+  function resize() {
+    W = canvas.width  = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+  }
+
+  function createNodes() {
+    nodes = Array.from({ length: NODE_COUNT }, () => ({
+      x:  Math.random() * W,
+      y:  Math.random() * H,
+      vx: (Math.random() - 0.5) * 0.25,
+      vy: (Math.random() - 0.5) * 0.25,
+      r:  1.2 + Math.random() * 1.5,
+    }));
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    for (const n of nodes) {
+      n.x += n.vx; n.y += n.vy;
+      if (n.x < 0 || n.x > W) n.vx *= -1;
+      if (n.y < 0 || n.y > H) n.vy *= -1;
+    }
+    // Edges
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const dx = nodes[i].x - nodes[j].x;
+        const dy = nodes[i].y - nodes[j].y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist < MAX_DIST) {
+          const alpha = (1 - dist / MAX_DIST) * 0.18;
+          ctx.strokeStyle = (i+j) % 3 === 0
+            ? `rgba(139, 92, 246, ${alpha})`
+            : `rgba(167, 139, 250, ${alpha * 0.7})`;
+          ctx.lineWidth = 0.6;
+          ctx.beginPath();
+          ctx.moveTo(nodes[i].x, nodes[i].y);
+          ctx.lineTo(nodes[j].x, nodes[j].y);
+          ctx.stroke();
+        }
+      }
+    }
+    // Nodes
+    for (const n of nodes) {
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(139, 92, 246, 0.45)`;
+      ctx.fill();
+    }
+    animId = requestAnimationFrame(draw);
+  }
+
+  window.addEventListener('resize', () => { cancelAnimationFrame(animId); resize(); draw(); });
+  resize(); createNodes(); draw();
+})();
+</script>
+
+</body>
+</html>
